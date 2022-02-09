@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "module": "commonjs",
+    "downlevelIteration": true,
+    "importHelpers": true,
+    "lib": [
+      "es2015",
+      "es2016",
+      "es2017",
+      "es2018",
+    ],
+    // ,TS1378: Top-level 'await' expressions are only allowed when the 'module' option is set to 'es2022', 'esnext', 'system', or 'nodenext', and the 'target' option is set to 'es2017' or higher.
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "src/"
+  ],
+  "exclude": [
+    "**/*.test.ts"
+  ]
+}

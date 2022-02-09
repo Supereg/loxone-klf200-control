@@ -1,0 +1,15 @@
+{
+  "out": "docs",
+  "includes": "src",
+  "exclude": ["src/**/*.test.ts"],
+
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeExternals": true,
+  "hideGenerator": true,
+  "includeVersion": false,
+  "validation": {
+    "invalidLink": true,
+    "notExported": true
+  }
+}
