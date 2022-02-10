@@ -1,20 +1,9 @@
 import "source-map-support";
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import * as winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import { WebService } from "./HTTPServer";
 import { KLFInterface } from "./KLFInterface";
-
-const enum LogLevel {
-  // noinspection JSUnusedGlobalSymbols
-  ERROR = "error",
-  WARN = "warn",
-  INFO = "info",
-  HTTP = "http",
-  VERBOSE = "verbose",
-  DEBUG = "debug",
-  SILLY = "silly",
-}
 
 function getVersion(): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -23,7 +12,7 @@ function getVersion(): string {
 }
 
 const logger = winston.createLogger({
-  level: LogLevel.DEBUG,
+  level: "debug",
   levels: winston.config.syslog.levels,
   format: winston.format.combine(
     winston.format.splat(),
@@ -36,7 +25,7 @@ const logger = winston.createLogger({
     winston.format.simple(),
   ),
   transports: [
-    new winston.transports.Console({ level: LogLevel.DEBUG }),
+    new winston.transports.Console({ level: "debug" }),
     new DailyRotateFile({
       dirname: ".",
       filename: "loxone-klf-200-%DATE%.log",
@@ -47,6 +36,15 @@ const logger = winston.createLogger({
   ],
 });
 
+function parseSafeInt(value: string): number {
+  // parseInt takes a string and a radix
+  const parsedValue = parseInt(value, 10);
+  if (isNaN(parsedValue)) {
+    throw new InvalidArgumentError("Not a number.");
+  }
+  return parsedValue;
+}
+
 const program = new Command();
 
 program
@@ -55,6 +53,7 @@ program
   .version(getVersion())
   .requiredOption("-n, --hostname <hostname>", "The hostname of the Velux KLF-200 interface.")
   .requiredOption("-p --password <password>", "The password of the Velux KLF-200 interface (Identical to the WiFi password).")
+  .option("-b --bind <port>", "The port the http web service binds on!", parseSafeInt, 8080)
   .parse();
 
 const options = program.opts();
@@ -63,7 +62,7 @@ logger.info("------------------------------------");
 logger.info("Welcome to loxone-klf-200-control v%s", getVersion());
 
 const klfInterface = new KLFInterface(logger, { hostname: options.hostname, password: options.password });
-const httpServer = new WebService(klfInterface);
+const httpServer = new WebService(logger, klfInterface);
 
 // this property tracks if our shutdown handler was already called! No need to exit twice!
 let shuttingDown = false;
@@ -102,9 +101,9 @@ process.on("SIGINT", signalHandler.bind(undefined, "SIGINT", 2));
 process.on("SIGTERM", signalHandler.bind(undefined, "SIGTERM", 15));
 process.on("uncaughtException", errorHandler);
 
-// TODO When to register routes => enable queuing of commands?
-httpServer.registerRoutes();
-
-klfInterface.setup()
+httpServer
+  .listen(options.bind)
+  .catch(errorHandler)
+  .then(() => klfInterface.setup())
   .catch(errorHandler);
 

@@ -1,4 +1,12 @@
-import { Connection, Gateway, IGW_FRAME_RCV, Products } from "klf-200-api";
+import {
+  Connection,
+  Gateway,
+  GW_COMMAND_RUN_STATUS_NTF,
+  GW_NODE_INFORMATION_CHANGED_NTF,
+  GW_NODE_STATE_POSITION_CHANGED_NTF,
+  IGW_FRAME_RCV, Product,
+  Products,
+} from "klf-200-api";
 import { Disposable } from "klf-200-api/dist/utils/TypedEvent";
 import { Logger } from "winston";
 import { TaskCancellationPromise, TaskCancellationError } from "./utils/TaskCancellationPromise";
@@ -28,7 +36,7 @@ export class KLFInterface {
   private readonly connectionCloseHandler: (hadError: boolean) => Promise<void>;
 
   private connectionState: ConnectionState = ConnectionState.DISCONNECTED;
-  private isShutdown = false;
+  private isShutdown = true;
   private keepAliveTimeout?: NodeJS.Timeout;
   private products?: Products;
 
@@ -59,6 +67,19 @@ export class KLFInterface {
     // TODO queueu unavailable? // or wait for setup (but only certain time)?
     const product = this.products?.Products[productId];
     await product?.setTargetPositionAsync(targetPosition / 100);
+  }
+
+  async open(productId: number): Promise<void> {
+
+  }
+
+  async close(productId: number): Promise<void> {
+
+  }
+
+
+  async stop(productId: number): Promise<void> {
+
   }
 
   async setup(): Promise<void> {
@@ -121,6 +142,9 @@ export class KLFInterface {
     this.products = await Products.createProductsAsync(this.connection);
     // TODO pretty print!
     this.logger.info("Found %d products: %o", this.products.Products.length, this.products.Products.map(product => product.Name));
+    this.logger.debug(`${this.products.Products}`);
+
+    // TODO Gateway State!
     // "GatewaySubState - This state shows if the gateway is currently idle or if it's running a command, a scene of if it's currently in a configuration mode."
 
     setupFuture.probeCancellation();
@@ -168,6 +192,22 @@ export class KLFInterface {
     this.connection.KLF200SocketProtocol!.socket.on("close", this.connectionCloseHandler);
     // TODO listen to error event to log error?
     this.logger.debug("---- KLF Interface is now considered CONNECTED ----");
+
+    /*
+    TODO tests
+    for (const product of this.products.Products) {
+      product.propertyChangedEvent.on(event => {
+        if (!(event.o instanceof Product)) {
+          return; // just necessary so we have proper typing!
+        }
+
+        if (event.propertyName === "TargetPosition") {
+          this.logger.debug(`TargetPosition of ${event.o.Name} changed to ${event.propertyValue}`);
+        }
+
+        // "TargetPositionRaw" / "TargetPosition"
+      });
+    }*/
   }
 
   async shutdown(): Promise<void> {
@@ -178,6 +218,10 @@ export class KLFInterface {
 
     this.isShutdown = true;
     this.cleanupResources(); // ensure resources are cleaned up, especially as we potentially have cancelled a `setup()` call!
+
+    if (!this.connection.KLF200SocketProtocol) {
+      return; // we aren't connected
+    }
 
     this.logger.info("Shutting down the connection to the KLF-200 Interface.");
     try {
@@ -191,6 +235,15 @@ export class KLFInterface {
 
   private handleReceivedFrame(frame: IGW_FRAME_RCV): void {
     this.logger.debug(`Received frame: ${JSON.stringify(frame)}`);
+
+    /*
+    if (frame instanceof GW_NODE_STATE_POSITION_CHANGED_NTF) {
+
+    } else if (frame instanceof GW_NODE_INFORMATION_CHANGED_NTF) {
+
+    } else if (frame instanceof GW_COMMAND_RUN_STATUS_NTF) {
+
+    }*/
   }
 
   private async handleConnectionClosed(hadError: boolean): Promise<void> {
