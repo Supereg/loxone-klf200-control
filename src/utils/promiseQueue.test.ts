@@ -1,4 +1,9 @@
+import * as winston from "winston";
 import { PromiseQueue } from "./PromiseQueue";
+
+const logger = winston.createLogger({
+  transports: [],
+});
 
 describe("PromiseQueue", () => {
   describe("push", () => {
@@ -18,11 +23,10 @@ describe("PromiseQueue", () => {
         return Promise.resolve();
       };
 
-      const queue = new PromiseQueue();
-      queue
-        .push(testFunc1)
-        .push(testFunc2)
-        .push(testFunc3);
+      const queue = new PromiseQueue(logger);
+      queue.push(testFunc1);
+      queue.push(testFunc2);
+      queue.push(testFunc3);
 
       const result = queue.waitAsync();
 

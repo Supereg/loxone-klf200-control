@@ -60,7 +60,7 @@ export class KLFInterface {
 
   constructor(logger: Logger, options: KLFInterfaceOptions) {
     this.logger = logger.child({});
-    this.connection = new Connection(options.hostname); // TODO CA + Fingerprint
+    this.connection = new Connection(options.hostname);
     // gateway must not be accessed till `setup` was called!
     this.gateway = new Gateway(this.connection);
 
@@ -85,7 +85,6 @@ export class KLFInterface {
 
     const product = this.products.Products[productId];
     if (!product) {
-      // TODO throw 404 instead
       throw new Error(`Product ${productId} could not be found!`);
     }
 
@@ -117,7 +116,7 @@ export class KLFInterface {
     }
 
     context.once(CommandSessionEvent.SESSION_FINISHED).then(() => {
-      // TODO if statusReply isn't OVERRULED(or does rain sensor set something?) => check if the target position is the expceted one!
+      // TODO if statusReply isn't OVERRULED(or does rain sensor set something?) => check if the target position is the excepted one!
       //   (e.g. => StatusReply.LimitationByRain)
     });
 
@@ -206,8 +205,9 @@ export class KLFInterface {
     setupFuture.probeCancellation();
 
     this.logger.debug("Setting the time zone...");
-    await this.gateway.setTimeZoneAsync(":GMT+1:GMT+2:0060:(1994)040102-0:110102-0"); // TODO in theory configureable?
-    // TODO expect GatewayMode_WithActuatorNodes
+    await this.gateway.setTimeZoneAsync(":GMT+1:GMT+2:0060:(1994)040102-0:110102-0"); // TODO in theory configurable?
+
+    // TODO assert Gateway state?
 
     setupFuture.probeCancellation();
 
@@ -217,9 +217,6 @@ export class KLFInterface {
     this.logger.info("Found %d products: %s",
       this.products.Products.length, this.products.Products.map(product => `{id: ${product.NodeID}, name: "${product.Name}"}`));
     this.logger.verbose(JSON.stringify(this.products.Products));
-
-    // TODO Gateway State!
-    // "GatewaySubState - This state shows if the gateway is currently idle or if it's running a command, a scene of if it's currently in a configuration mode."
 
     setupFuture.probeCancellation();
 

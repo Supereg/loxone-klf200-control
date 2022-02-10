@@ -72,7 +72,7 @@ export class WebService {
         }, reason => {
           // TODO flicker light on error!
           response
-            .status(500)
+            .status(500) // TODO error stuff?
             .json({ status: "error", error: reason });
         });
     });
