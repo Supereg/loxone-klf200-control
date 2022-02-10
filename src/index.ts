@@ -4,6 +4,7 @@ import * as winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import { WebService } from "./HTTPServer";
 import { KLFInterface } from "./KLFInterface";
+import { promiseTimeout } from "./utils/promiseTimeout";
 
 function getVersion(): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires

@@ -1,9 +1,9 @@
 import {
   Connection,
-  Gateway,
+  Gateway, GW_COMMAND_REMAINING_TIME_NTF,
   GW_COMMAND_RUN_STATUS_NTF,
   GW_NODE_INFORMATION_CHANGED_NTF,
-  GW_NODE_STATE_POSITION_CHANGED_NTF,
+  GW_NODE_STATE_POSITION_CHANGED_NTF, GW_SESSION_FINISHED_NTF,
   IGW_FRAME_RCV, Product,
   Products,
 } from "klf-200-api";
@@ -31,7 +31,7 @@ export class KLFInterface {
   private readonly options: KLFInterfaceOptions;
 
   // The KLF can handle 2 concurrent connections and can't process requests in parallel.
-  private readonly commandQueue: PromiseQueue<void>;
+  private readonly commandQueue: PromiseQueue;
   private readonly registeredEventHandlers: Disposable[] = [];
   private readonly connectionCloseHandler: (hadError: boolean) => Promise<void>;
 
@@ -63,23 +63,53 @@ export class KLFInterface {
     this.connectionCloseHandler = this.handleConnectionClosed.bind(this);
   }
 
-  async setTargetPosition(productId: number, targetPosition: number): Promise<void> {
-    // TODO queueu unavailable? // or wait for setup (but only certain time)?
-    const product = this.products?.Products[productId];
-    await product?.setTargetPositionAsync(targetPosition / 100);
+  async awaitProductAvailability(productId: number): Promise<Product> {
+    if (this.setupFuture) {
+      await this.setupFuture.awaitCompletion();
+      // awaiting completion can also mean the task has been cancelled, therefore
+      // we still need to check if products is actually available!
+    }
+
+    if (!this.products) {
+      // There is no good reason to wait e.g. for a reconnect. If it failed already one time it might fail a second time.
+      // And connecting usually takes way to long, making the command obsolete anyway!
+      throw new Error("Connection to the KLF-200 Interface seems to be lost. Please try again in a few seconds!");
+    }
+
+    const product = this.products.Products[productId];
+    if (!product) {
+      // TODO throw 404 instead
+      throw new Error(`Product ${productId} could not be found!`);
+    }
+
+    return product;
   }
 
   async open(productId: number): Promise<void> {
+    // TODO e.g. rain detection, if already opened! => flicker light? => can we override stuff?
+    //  => notify if we did not fully open?
 
+    const product = await this.awaitProductAvailability(productId);
+
+    // TODO returns the sessionId!
+    this.commandQueue.push(() => product.setTargetPositionAsync(1));
+
+    // TODO listen for run status!
   }
 
   async close(productId: number): Promise<void> {
+    const product = await this.awaitProductAvailability(productId);
 
+    // TODO returns the sessionId!
+    this.commandQueue.push(() => product.setTargetPositionAsync(0));
   }
 
 
   async stop(productId: number): Promise<void> {
+    const product = await this.awaitProductAvailability(productId);
 
+    // TODO returns the sessionId!
+    this.commandQueue.push(() => product.stopAsync());
   }
 
   async setup(): Promise<void> {
@@ -111,8 +141,6 @@ export class KLFInterface {
     } finally {
       this.setupFuture = undefined;
     }
-
-    // TODO work on command queue?
   }
 
   private async _setupCall(setupFuture: TaskCancellationPromise): Promise<void> {
@@ -140,9 +168,11 @@ export class KLFInterface {
 
     this.logger.debug("Querying the products list from the gateway...");
     this.products = await Products.createProductsAsync(this.connection);
+
     // TODO pretty print!
-    this.logger.info("Found %d products: %o", this.products.Products.length, this.products.Products.map(product => product.Name));
-    this.logger.debug(`${this.products.Products}`);
+    this.logger.info("Found %d products: %s",
+      this.products.Products.length, this.products.Products.map(product => `{id: ${product.NodeID}, name: "${product.Name}"}`));
+    this.logger.debug(this.products.Products);
 
     // TODO Gateway State!
     // "GatewaySubState - This state shows if the gateway is currently idle or if it's running a command, a scene of if it's currently in a configuration mode."
@@ -235,6 +265,16 @@ export class KLFInterface {
 
   private handleReceivedFrame(frame: IGW_FRAME_RCV): void {
     this.logger.debug(`Received frame: ${JSON.stringify(frame)}`);
+
+    if (frame instanceof GW_NODE_STATE_POSITION_CHANGED_NTF) {
+
+    } else if (frame instanceof GW_COMMAND_RUN_STATUS_NTF) {
+
+    } else if (frame instanceof GW_COMMAND_REMAINING_TIME_NTF) {
+
+    } else if (frame instanceof GW_SESSION_FINISHED_NTF) {
+
+    }
 
     /*
     if (frame instanceof GW_NODE_STATE_POSITION_CHANGED_NTF) {

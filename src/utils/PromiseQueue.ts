@@ -1,5 +1,5 @@
 
-export class PromiseQueue<T> {
+export class PromiseQueue<T = unknown> {
   private nextPromise: Promise<T | void> = Promise.resolve();
 
   public push(asyncFunction: () => Promise<T | void>): this {
