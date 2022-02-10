@@ -3,6 +3,7 @@ import { Server } from "http";
 import { AddressInfo } from "net";
 import { Logger } from "winston";
 import { KLFInterface } from "./KLFInterface";
+import { RunCommandSession } from "./RunCommandSession";
 
 export class WebService {
   private readonly logger: Logger;
@@ -44,7 +45,7 @@ export class WebService {
       }
 
       // TODO When to register routes => enable queuing of commands?
-      let promise: Promise<void>;
+      let promise: Promise<RunCommandSession>;
       switch (query.command.toLowerCase()) {
       case "open":
         promise = this.klfInterface.open(nodeId);
@@ -69,6 +70,7 @@ export class WebService {
             .status(200)
             .json({ status: "success" });
         }, reason => {
+          // TODO flicker light on error!
           response
             .status(500)
             .json({ status: "error", error: reason });

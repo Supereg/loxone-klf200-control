@@ -1,17 +1,21 @@
 import {
   Connection,
-  Gateway, GW_COMMAND_REMAINING_TIME_NTF,
-  GW_COMMAND_RUN_STATUS_NTF,
-  GW_NODE_INFORMATION_CHANGED_NTF,
-  GW_NODE_STATE_POSITION_CHANGED_NTF, GW_SESSION_FINISHED_NTF,
-  IGW_FRAME_RCV, Product,
+  Gateway, GatewayCommand,
+  GatewayState,
+  GatewaySubState, GW_ERROR, GW_ERROR_NTF,
+  GW_NODE_STATE_POSITION_CHANGED_NTF,
+  IGW_FRAME_RCV,
+  Product,
   Products,
+  RunStatus,
+  StatusReply,
 } from "klf-200-api";
 import { Disposable } from "klf-200-api/dist/utils/TypedEvent";
 import { Logger } from "winston";
-import { TaskCancellationPromise, TaskCancellationError } from "./utils/TaskCancellationPromise";
-import { PromiseQueue } from "./utils/PromiseQueue";
-import { promiseTimeout } from "./utils/promiseTimeout";
+import { CommandSessionEvent, RunCommandSession } from "./RunCommandSession";
+import { promisedWait } from "./utils/promisedWait";
+import { PromiseQueue, PromiseQueueElement } from "./utils/PromiseQueue";
+import { TaskCancellationError, TaskCancellationPromise } from "./utils/TaskCancellationPromise";
 
 export const enum ConnectionState {
   DISCONNECTED,
@@ -24,7 +28,10 @@ export interface KLFInterfaceOptions {
 }
 
 export class KLFInterface {
-  private readonly logger: Logger;
+  private static readonly keepAliveTimoutInterval = 5 * 60 * 1000;
+  // TODO do we need a gateway reboot scheduler?
+
+  readonly logger: Logger;
   private readonly connection: Connection;
   private readonly gateway: Gateway;
 
@@ -59,11 +66,11 @@ export class KLFInterface {
 
     this.options = options;
 
-    this.commandQueue = new PromiseQueue();
+    this.commandQueue = new PromiseQueue(this.logger);
     this.connectionCloseHandler = this.handleConnectionClosed.bind(this);
   }
 
-  async awaitProductAvailability(productId: number): Promise<Product> {
+  public async awaitProductAvailability(productId: number): Promise<Product> {
     if (this.setupFuture) {
       await this.setupFuture.awaitCompletion();
       // awaiting completion can also mean the task has been cancelled, therefore
@@ -85,31 +92,69 @@ export class KLFInterface {
     return product;
   }
 
-  async open(productId: number): Promise<void> {
-    // TODO e.g. rain detection, if already opened! => flicker light? => can we override stuff?
-    //  => notify if we did not fully open?
-
-    const product = await this.awaitProductAvailability(productId);
-
-    // TODO returns the sessionId!
-    this.commandQueue.push(() => product.setTargetPositionAsync(1));
-
-    // TODO listen for run status!
+  public enqueueCommand<T>(command: PromiseQueueElement<T>): Promise<T> {
+    return this.commandQueue.push(command);
   }
 
-  async close(productId: number): Promise<void> {
-    const product = await this.awaitProductAvailability(productId);
+  // TODO can we override the rain sensor?
 
-    // TODO returns the sessionId!
-    this.commandQueue.push(() => product.setTargetPositionAsync(0));
+  async open(productId: number): Promise<RunCommandSession> {
+    // TODO flicker light if we reached limit due to rain sensor!
+
+    // TODO timeout of 10 seconds is a bit long?
+    const context = await RunCommandSession.executeCommand(
+      this,
+      productId,
+      // this is a bit weird, but we are basically producing a double closure.
+      // a closure that produces the closure which actually executes the command.
+      product => () => product.setTargetPositionAsync(1),
+    );
+
+    // wait for the first run_status_notification
+    const [status, reply] = await context.once(CommandSessionEvent.RUN_STATUS); // TODO timeout RUN_STATUS?
+    if (status === RunStatus.ExecutionFailed) {
+      throw new Error(`Execution failed: ${StatusReply[reply]}`);
+    }
+
+    context.once(CommandSessionEvent.SESSION_FINISHED).then(() => {
+      // TODO if statusReply isn't OVERRULED(or does rain sensor set something?) => check if the target position is the expceted one!
+      //   (e.g. => StatusReply.LimitationByRain)
+    });
+
+    return context;
+  }
+
+  async close(productId: number): Promise<RunCommandSession> {
+    const context = await RunCommandSession.executeCommand(
+      this,
+      productId,
+      product => () => product.setTargetPositionAsync(0),
+    );
+
+    // wait for the first run_status_notification
+    const [status, reply] = await context.once(CommandSessionEvent.RUN_STATUS);
+    if (status === RunStatus.ExecutionFailed) {
+      throw new Error(`Execution failed: ${StatusReply[reply]}`);
+    }
+
+    return context;
   }
 
 
-  async stop(productId: number): Promise<void> {
-    const product = await this.awaitProductAvailability(productId);
+  async stop(productId: number): Promise<RunCommandSession> {
+    const context = await RunCommandSession.executeCommand(
+      this,
+      productId,
+      product => () => product.stopAsync(),
+    );
 
-    // TODO returns the sessionId!
-    this.commandQueue.push(() => product.stopAsync());
+    // wait for the first run_status_notification
+    const [status, reply] = await context.once(CommandSessionEvent.RUN_STATUS);
+    if (status === RunStatus.ExecutionFailed) {
+      throw new Error(`Execution failed: ${StatusReply[reply]}`);
+    }
+
+    return context;
   }
 
   async setup(): Promise<void> {
@@ -169,10 +214,9 @@ export class KLFInterface {
     this.logger.debug("Querying the products list from the gateway...");
     this.products = await Products.createProductsAsync(this.connection);
 
-    // TODO pretty print!
     this.logger.info("Found %d products: %s",
       this.products.Products.length, this.products.Products.map(product => `{id: ${product.NodeID}, name: "${product.Name}"}`));
-    this.logger.debug(this.products.Products);
+    this.logger.verbose(JSON.stringify(this.products.Products));
 
     // TODO Gateway State!
     // "GatewaySubState - This state shows if the gateway is currently idle or if it's running a command, a scene of if it's currently in a configuration mode."
@@ -192,36 +236,24 @@ export class KLFInterface {
       this.logger.info(`Product with id ${productId} was removed from the KLF-200 Interface!`);
     }));
 
-    // TODO this.gateway.rebootAsync()
-    // TODO this.connection.startKeepAlive()
-
     this.logger.debug("Setting up frame handler!");
     this.registeredEventHandlers.push(
       this.connection.on(this.handleReceivedFrame.bind(this)),
     );
-    /*
-    this.log.info(`Setting up notification handler for gateway state...`);
-		this.disposables.push(this._Connection!.on(this.onFrameReceived.bind(this)));
-		this.log.debug(`Frame received: ${JSON.stringify(frame)}`);
-		if (!(frame instanceof GW_GET_STATE_CFM) && !(frame instanceof GW_REBOOT_CFM)) {
-			// Confirmation messages of the GW_GET_STATE_REQ must be ignored to avoid an infinity loop
-			await this.Setup?.stateTimerHandler(this, this.Gateway!);
-		}
-     */
-
-    // TODO klf closes the connection after 15 minutes of inactivity
-    // TODO this.connection.startKeepAlive(); we probably want to implement this ourselves to handle command queuing?
-    //  => also handle command shifting?
-
-    // TODO there is this custom this._Setup?.startStateTimer(); (5 * 60 * 1000,)
 
     setupFuture.probeCancellation();
 
-    this.logger.debug("Setting up the watch dog close connection handler!");
+    this.logger.debug("Setting up the connection watch dog!");
     this.connectionState = ConnectionState.CONNECTED;
     this.connection.KLF200SocketProtocol!.socket.on("close", this.connectionCloseHandler);
     // TODO listen to error event to log error?
+
+    this.scheduleKeepAliveTimeout();
+
     this.logger.debug("---- KLF Interface is now considered CONNECTED ----");
+
+    // TODO register property change
+    // TODO register property change on new product!
 
     /*
     TODO tests
@@ -264,26 +296,16 @@ export class KLFInterface {
   }
 
   private handleReceivedFrame(frame: IGW_FRAME_RCV): void {
-    this.logger.debug(`Received frame: ${JSON.stringify(frame)}`);
+    this.logger.verbose(`Received frame ${GatewayCommand[frame.Command] ?? "?"}: ${JSON.stringify(frame)}`);
 
     if (frame instanceof GW_NODE_STATE_POSITION_CHANGED_NTF) {
-
-    } else if (frame instanceof GW_COMMAND_RUN_STATUS_NTF) {
-
-    } else if (frame instanceof GW_COMMAND_REMAINING_TIME_NTF) {
-
-    } else if (frame instanceof GW_SESSION_FINISHED_NTF) {
-
+      // TODO in theory we only need a property listener on the `targetProperty` right? (and check if this was caused by on ongoing command?)
+      // TODO if this isn't triggered by us this is triggered by the rain sensor(?) or by a remote
+      //  -> reflect this state change in loxone!
+    } else if (frame instanceof GW_ERROR_NTF) {
+      // Typically, such a frame will be sent after any REQ frame and the respective promise will be rejected. We just capture this to log it.
+      this.logger.error(`The KLF-200 Interface returned a ERROR NOTIFICATION with error ${GW_ERROR[frame.ErrorNumber]}`);
     }
-
-    /*
-    if (frame instanceof GW_NODE_STATE_POSITION_CHANGED_NTF) {
-
-    } else if (frame instanceof GW_NODE_INFORMATION_CHANGED_NTF) {
-
-    } else if (frame instanceof GW_COMMAND_RUN_STATUS_NTF) {
-
-    }*/
   }
 
   private async handleConnectionClosed(hadError: boolean): Promise<void> {
@@ -297,7 +319,6 @@ export class KLFInterface {
     }
     this.logger.crit(`The connection to the KLF-200 Interface was lost${hadError ? "due to some error": ""}! Will reconnect!`);
 
-    // TODO check we are not shutting down!
     while (!this.isShutdown) {
       this.logger.debug("Trying to reconnect...");
       try {
@@ -312,7 +333,7 @@ export class KLFInterface {
         this.logger.error(`Login attempt to KLF-200 Interface at ${this.options.hostname} failed: %s`, error);
         this.logger.warn("Retrying login in 1 second...");
 
-        await promiseTimeout(1000); // TODO configurable?
+        await promisedWait(1000);
       }
     }
   }
@@ -328,7 +349,36 @@ export class KLFInterface {
       disposable.dispose();
     }
 
-    this.products = undefined; // TODO rename method!
-    // TODO other state to clear?
+    this.products = undefined;
+    this.resetKeepAliveTimeout();
+  }
+
+  public scheduleKeepAliveTimeout(): void {
+    this.resetKeepAliveTimeout();
+
+    this.keepAliveTimeout = setInterval(this.handleKeepAliveTimeoutTrigger.bind(this), KLFInterface.keepAliveTimoutInterval);
+  }
+
+  private resetKeepAliveTimeout() {
+    if (this.keepAliveTimeout) {
+      try {
+        clearInterval(this.keepAliveTimeout);
+      } finally {
+        this.keepAliveTimeout = undefined;
+      }
+    }
+  }
+
+  private handleKeepAliveTimeoutTrigger() {
+    // noinspection JSIgnoredPromiseFromCall
+    this.commandQueue.push(async () => {
+      try {
+        const gatewayState = await this.gateway.getStateAsync();
+
+        this.logger.debug("Current gateway status '%s' and sub-status '%s'.", GatewayState[gatewayState.GatewayState], GatewaySubState[gatewayState.SubState]);
+      } catch (error) {
+        this.logger.warn("Encountered error while retrieving gateway status: %s", error instanceof Error ? error.message : error);
+      }
+    });
   }
 }

@@ -19,7 +19,10 @@ describe("PromiseQueue", () => {
       };
 
       const queue = new PromiseQueue();
-      queue.push(testFunc1).push(testFunc2).push(testFunc3);
+      queue
+        .push(testFunc1)
+        .push(testFunc2)
+        .push(testFunc3);
 
       const result = queue.waitAsync();
 

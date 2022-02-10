@@ -2,9 +2,10 @@ import "source-map-support";
 import { Command, InvalidArgumentError } from "commander";
 import * as winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
+import { AbstractConfigSetColors, AbstractConfigSetLevels } from "winston/lib/winston/config";
 import { WebService } from "./HTTPServer";
 import { KLFInterface } from "./KLFInterface";
-import { promiseTimeout } from "./utils/promiseTimeout";
+import { promisedWait } from "./utils/promisedWait";
 
 function getVersion(): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -12,21 +13,45 @@ function getVersion(): string {
   return packageJSON.version;
 }
 
+const levels: AbstractConfigSetLevels = {
+  emerg: 0,
+  alert: 1,
+  crit: 2,
+  error: 3,
+  warning: 4,
+  notice: 5,
+  info: 6,
+  debug: 7,
+  verbose: 8,
+};
+
+const colors: Record<string, string> = {
+  emerg: "red",
+  alert: "yellow",
+  crit: "red",
+  error: "red",
+  warning: "yellow",
+  notice: "cyan",
+  info: "green",
+  debug: "blue",
+  verbose: "grey",
+};
+
 const logger = winston.createLogger({
-  level: "debug",
-  levels: winston.config.syslog.levels,
+  level: "verbose",
+  levels: levels,
   format: winston.format.combine(
     winston.format.splat(),
     // winston.format.ms(),
     // winston.format.timestamp(),
-    winston.format.colorize(),
+    winston.format.colorize({ colors: colors }),
     // winston.format.padLevels(),
     // winston.format.label({ label: "main", message: true }),
     winston.format.errors({ stack: true }),
     winston.format.simple(),
   ),
   transports: [
-    new winston.transports.Console({ level: "debug" }),
+    new winston.transports.Console({ level: "verbose" }),
     new DailyRotateFile({
       dirname: ".",
       filename: "loxone-klf-200-%DATE%.log",
