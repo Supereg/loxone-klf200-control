@@ -7,7 +7,7 @@ export class PromiseQueue {
   private nextPromise: Promise<unknown> = Promise.resolve();
 
   constructor(logger: Logger) {
-    this.logger = logger.child({});
+    this.logger = logger.child({ label: "PromiseQueue" });
   }
 
   public push<T>(asyncFunction: PromiseQueueElement<T>): Promise<T> {

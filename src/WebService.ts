@@ -13,7 +13,7 @@ export class WebService {
   private httpServer?: Server;
 
   constructor(logger: Logger, klfInterface: KLFInterface) {
-    this.logger = logger.child({});
+    this.logger = logger.child({ label: "WebService" });
     this.app = express();
     this.klfInterface = klfInterface;
   }

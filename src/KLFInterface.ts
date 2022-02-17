@@ -59,7 +59,7 @@ export class KLFInterface {
   private setupFuture?: TaskCancellationPromise;
 
   constructor(logger: Logger, options: KLFInterfaceOptions) {
-    this.logger = logger.child({});
+    this.logger = logger.child({ label: "KLF" });
     this.connection = new Connection(options.hostname);
     // gateway must not be accessed till `setup` was called!
     this.gateway = new Gateway(this.connection);

@@ -3,7 +3,7 @@ import { Command, InvalidArgumentError } from "commander";
 import * as winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import { AbstractConfigSetColors, AbstractConfigSetLevels } from "winston/lib/winston/config";
-import { WebService } from "./HTTPServer";
+import { WebService } from "./WebService";
 import { KLFInterface } from "./KLFInterface";
 import { promisedWait } from "./utils/promisedWait";
 
@@ -37,27 +37,38 @@ const colors: Record<string, string> = {
   verbose: "grey",
 };
 
+const formats = [
+  winston.format.splat(),
+  winston.format.ms(),
+  winston.format.timestamp({ format: "YYYY-MM-DD hh:mm:ss.SSS" }),
+  winston.format.errors({ stack: true }),
+];
+
+const printf = winston.format.printf(info => {
+  return `${info.timestamp} {${info.ms}} ${info.level}: [${info.label ?? "main"}] ${info.message}`;
+});
+
 const logger = winston.createLogger({
   level: "verbose",
   levels: levels,
-  format: winston.format.combine(
-    winston.format.splat(),
-    // winston.format.ms(),
-    // winston.format.timestamp(),
-    winston.format.colorize({ colors: colors }),
-    // winston.format.padLevels(),
-    // winston.format.label({ label: "main", message: true }),
-    winston.format.errors({ stack: true }),
-    winston.format.simple(),
-  ),
   transports: [
-    new winston.transports.Console({ level: "verbose" }),
+    new winston.transports.Console({
+      level: "verbose",
+      format: winston.format.combine(
+        ...formats,
+        winston.format.colorize({ colors: colors }),
+        printf,
+      ),
+    }),
     new DailyRotateFile({
       dirname: ".",
       filename: "loxone-klf-200-%DATE%.log",
-      maxFiles: 5,
+      maxFiles: 10,
       createSymlink: false, // TODO toggle?
-      // TODO no colorized format in the file!
+      format: winston.format.combine(
+        ...formats,
+        printf,
+      ),
     }),
   ],
 });
