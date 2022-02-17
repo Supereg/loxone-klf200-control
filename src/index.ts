@@ -45,7 +45,7 @@ const formats = [
 ];
 
 const printf = winston.format.printf(info => {
-  return `${info.timestamp} {${info.ms}} ${info.level}: [${info.label ?? "main"}] ${info.message}`;
+  return `${info.timestamp} ${info.level}: [${info.label ?? "main"}] ${info.message}  ${info.ms}`;
 });
 
 const logger = winston.createLogger({
