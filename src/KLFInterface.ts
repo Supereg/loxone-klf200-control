@@ -1,8 +1,12 @@
 import {
   Connection,
-  Gateway, GatewayCommand,
+  Gateway,
+  GatewayCommand,
   GatewayState,
-  GatewaySubState, GW_ERROR, GW_ERROR_NTF,
+  GatewaySubState,
+  GW_ERROR,
+  GW_ERROR_NTF,
+  GW_GET_LOCAL_TIME_REQ,
   GW_NODE_STATE_POSITION_CHANGED_NTF,
   IGW_FRAME_RCV,
   Product,
@@ -339,7 +343,7 @@ export class KLFInterface {
     if (this.connection.KLF200SocketProtocol) {
       this.connection.KLF200SocketProtocol.socket.off("close", this.connectionCloseHandler);
     } else if (!this.isShutdown) {
-      this.logger.warn("Tried to cleanup 'close' event handler, though the connection socket wasn't accessible anymore!");
+      this.logger.warning("Tried to cleanup 'close' event handler, though the connection socket wasn't accessible anymore!");
     }
 
     for (const disposable of this.registeredEventHandlers) {
@@ -374,7 +378,7 @@ export class KLFInterface {
 
         this.logger.debug("Current gateway status '%s' and sub-status '%s'.", GatewayState[gatewayState.GatewayState], GatewaySubState[gatewayState.SubState]);
       } catch (error) {
-        this.logger.warn("Encountered error while retrieving gateway status: %s", error instanceof Error ? error.message : error);
+        this.logger.warning("Encountered error while retrieving gateway status: %s", error instanceof Error ? error.message : error);
       }
     });
   }
