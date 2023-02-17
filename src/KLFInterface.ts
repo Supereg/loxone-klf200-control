@@ -127,7 +127,7 @@ export class KLFInterface {
     return context;
   }
 
-  async close(productId: number): Promise<RunCommandSession> {
+  async close(productId: number): Promise<RunCommandSession> { // TODO rename method?
     const context = await RunCommandSession.executeCommand(
       this,
       productId,
@@ -185,6 +185,10 @@ export class KLFInterface {
         return;
       }
 
+      // we throw the error if in the first setup procedure something is going wrong (and do not try again; potential configuration errors)!
+
+      this.logger.error("KLF 200 setup call failed with %s", error);
+      this.setupFuture.confirmRejection(error);
       throw error;
     } finally {
       this.setupFuture = undefined;
@@ -194,7 +198,7 @@ export class KLFInterface {
   private async _setupCall(setupFuture: TaskCancellationPromise): Promise<void> {
     this.logger.debug("---- Starting to setup the KLF Interface ----");
     this.logger.info("Logging into the KLF 200 Interface...");
-    await this.connection.loginAsync(this.options.password);
+    await this.connection.loginAsync(this.options.password, 20); // TODO timeout?
 
     setupFuture.probeCancellation();
 
@@ -277,6 +281,7 @@ export class KLFInterface {
   async shutdown(): Promise<void> {
     // check if there is a `setup()` still running. If so, cancel it and wait for it.
     if (this.setupFuture) {
+      this.logger.info("Shutting down while still in setup! Waiting for setup cancellation!");
       await this.setupFuture.cancel("shutdown");
     }
 
@@ -293,7 +298,7 @@ export class KLFInterface {
 
       this.logger.info("Logged out successfully.");
     } catch (error) {
-      this.logger.warn("We failed to log out from the KLF-200 Interface: %s", error);
+      this.logger.warning("We failed to log out from the KLF-200 Interface: %s", error);
     }
   }
 
@@ -317,9 +322,9 @@ export class KLFInterface {
     this.cleanupResources();
 
     if (this.isShutdown) {
-      this.logger.warn("Received close event even though we are in an expected shutdown!");
+      this.logger.warning("Received close event even though we are in an expected shutdown!");
     }
-    this.logger.crit(`The connection to the KLF-200 Interface was lost${hadError ? "due to some error": ""}! Will reconnect!`);
+    this.logger.crit(`The connection to the KLF-200 Interface was lost${hadError ? " due to some error": ""}! Will reconnect!`);
 
     while (!this.isShutdown) {
       this.logger.debug("Trying to reconnect...");
@@ -331,9 +336,9 @@ export class KLFInterface {
 
         // break the loop we succeeded
         break;
-      } catch (error) {
+      } catch (error) { // TODO can we handle continuous timeout?
         this.logger.error(`Login attempt to KLF-200 Interface at ${this.options.hostname} failed: %s`, error);
-        this.logger.warn("Retrying login in 1 second...");
+        this.logger.warning("Retrying login in 1 second...");
 
         await promisedWait(1000);
       }

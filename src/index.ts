@@ -1,11 +1,11 @@
-import "source-map-support";
 import { Command, InvalidArgumentError } from "commander";
+import "source-map-support";
 import * as winston from "winston";
+import { Logger } from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import { AbstractConfigSetColors, AbstractConfigSetLevels } from "winston/lib/winston/config";
-import { WebService } from "./WebService";
+import { AbstractConfigSetLevels } from "winston/lib/winston/config";
 import { KLFInterface } from "./KLFInterface";
-import { promisedWait } from "./utils/promisedWait";
+import { WebService } from "./WebService";
 
 function getVersion(): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -48,30 +48,32 @@ const printf = winston.format.printf(info => {
   return `${info.timestamp} ${info.level}: [${info.label ?? "main"}] ${info.message}  ${info.ms}`;
 });
 
-const logger = winston.createLogger({
-  level: "verbose",
-  levels: levels,
-  transports: [
-    new winston.transports.Console({
-      level: "verbose",
-      format: winston.format.combine(
-        ...formats,
-        winston.format.colorize({ colors: colors }),
-        printf,
-      ),
-    }),
-    new DailyRotateFile({
-      dirname: ".",
-      filename: "loxone-klf-200-%DATE%.log",
-      maxFiles: 10,
-      createSymlink: false, // TODO toggle?
-      format: winston.format.combine(
-        ...formats,
-        printf,
-      ),
-    }),
-  ],
-});
+function createLogger(level: string): Logger {
+  return winston.createLogger({
+    level: level,
+    levels: levels,
+    transports: [
+      new winston.transports.Console({
+        level: level,
+        format: winston.format.combine(
+          ...formats,
+          winston.format.colorize({ colors: colors }),
+          printf,
+        ),
+      }),
+      new DailyRotateFile({
+        dirname: ".",
+        filename: "loxone-klf-200-%DATE%.log",
+        maxFiles: 10,
+        createSymlink: false, // TODO toggle?
+        format: winston.format.combine(
+          ...formats,
+          printf,
+        ),
+      }),
+    ],
+  });
+}
 
 function parseSafeInt(value: string): number {
   // parseInt takes a string and a radix
@@ -91,10 +93,14 @@ program
   .requiredOption("-n, --hostname <hostname>", "The hostname of the Velux KLF-200 interface.")
   .requiredOption("-p --password <password>", "The password of the Velux KLF-200 interface (Identical to the WiFi password).")
   .option("-b --bind <port>", "The port the http web service binds on!", parseSafeInt, 8080)
+  .option("-l --log-level <level>",
+    "The desired log level. Default `debug` (Available: `verbose`, `debug`, `info`, `notice`, `warning`, `error`, `crit`).",
+    "debug")
   .parse();
 
 const options = program.opts();
 
+const logger = createLogger(options.logLevel);
 logger.info("------------------------------------");
 logger.info("Welcome to loxone-klf-200-control v%s", getVersion());
 
@@ -105,15 +111,7 @@ const httpServer = new WebService(logger, klfInterface);
 let shuttingDown = false;
 // TODO systemd service!
 
-// setup signal handlers
-const signalHandler = (signal: NodeJS.Signals, signalNum: number): void => {
-  if (shuttingDown) {
-    return;
-  }
-  shuttingDown = true;
-
-  logger.info("Shutting down loxone-kl200-control. Got signal %s.", signal);
-
+const shutdownHandler = (signalNum = 0): void => {
   httpServer
     .shutdown()
     .catch(reason => logger.error("Failed to shutdown web service: %s", reason))
@@ -124,6 +122,16 @@ const signalHandler = (signal: NodeJS.Signals, signalNum: number): void => {
       logger.close();
       process.exit(128 + signalNum); // TODO exit gracefully?
     });
+};
+
+const signalHandler = (signal: NodeJS.Signals, signalNum: number): void => {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+
+  logger.info("Shutting down loxone-kl200-control. Got signal %s.", signal);
+  shutdownHandler(signalNum);
 };
 
 const errorHandler = (error: Error): void => {
@@ -140,7 +148,11 @@ process.on("uncaughtException", errorHandler);
 
 httpServer
   .listen(options.bind)
-  .catch(errorHandler)
   .then(() => klfInterface.setup())
-  .catch(errorHandler);
+  .catch(reason => {
+    logger.verbose("Reached end of setup promise chain with error reason %s", reason);
+    logger.info("First KLF-200 setup call was unsuccessful (%s). Shutting down the application...", reason?.message ?? reason);
+
+    shutdownHandler();
+  });
 

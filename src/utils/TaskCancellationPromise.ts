@@ -12,6 +12,7 @@ export class TaskCancellationError extends Error {
 export class TaskCancellationPromise {
   private readonly promise: Promise<void>;
   private resolve!: () => void;
+  private reject!: (reason?: unknown) => void;
 
   private cancelReason?: string;
   private destroyed = false;
@@ -21,7 +22,10 @@ export class TaskCancellationPromise {
   }
 
   constructor() {
-    this.promise = new Promise<void>(resolve => this.resolve = resolve);
+    this.promise = new Promise<void>((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+    });
   }
 
   awaitCompletion(): Promise<void> {
@@ -33,7 +37,8 @@ export class TaskCancellationPromise {
     assert(!this.destroyed, "Illegal access after future was already destroyed!");
 
     this.cancelReason = reason;
-    return this.promise;
+    return this.promise
+      .catch(); // callers cancelling the promise don't care about exceptions, just throw them away!
   }
 
   probeCancellation(): void {
@@ -54,5 +59,12 @@ export class TaskCancellationPromise {
     this.destroyed = true;
 
     this.resolve();
+  }
+
+  confirmRejection(reason?: unknown): void {
+    assert(!this.destroyed, "Illegal access after future was already destroyed!");
+    this.destroyed = true;
+
+    this.reject(reason);
   }
 }
