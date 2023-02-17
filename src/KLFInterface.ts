@@ -211,6 +211,7 @@ export class KLFInterface {
     this.logger.debug("Setting the time zone...");
     await this.gateway.setTimeZoneAsync(":GMT+1:GMT+2:0060:(1994)040102-0:110102-0"); // TODO in theory configurable?
 
+    this.logger.debug(`Interface view on the time ${JSON.stringify(await this.connection.sendFrameAsync(new GW_GET_LOCAL_TIME_REQ()))}`);
     // TODO assert Gateway state?
 
     setupFuture.probeCancellation();
