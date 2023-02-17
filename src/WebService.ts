@@ -20,14 +20,22 @@ export class WebService {
 
   public async listen(port = 0): Promise<void> { // TODO ability to supply hostname?
     return new Promise((resolve, reject) => {
-      // TODO setup reject on first error!
+      const errorHandler = (error: Error) => {
+        this.logger.debug("WebService failed to start with error: %s", error);
+        reject(error);
+      };
+
       this.httpServer = this.app.listen(port, () => {
         const address = this.httpServer!.address() as AddressInfo;
         this.logger.info(`WebService is running on ${address.address}:${address.port}`);
 
+        this.httpServer!.removeListener("error", errorHandler);
+
         this.registerRoutes();
         resolve();
       });
+
+      this.httpServer.once("error", errorHandler);
     });
   }
 
@@ -38,15 +46,18 @@ export class WebService {
       const query = request.query;
 
       if (!query.command || typeof query.command !== "string") {
+        this.logger.warning("Received request for product %d with missing `command` parameter!", nodeId);
         response
           .status(400)
           .json({ status: "error", error: "Query parameter 'command' missing or malformed!" });
         return;
       }
 
-      // TODO When to register routes => enable queuing of commands?
+      // TODO When to register routes => enable queuing of commands (per node?)?
       let promise: Promise<RunCommandSession>;
-      switch (query.command.toLowerCase()) {
+      const command = query.command.toLowerCase();
+
+      switch (command) {
       case "open":
         promise = this.klfInterface.open(nodeId);
         break;
@@ -63,14 +74,18 @@ export class WebService {
         return;
       }
 
+      this.logger.info("Received %s command for node %d...", command, nodeId);
 
       promise
         .then(() => {
+          this.logger.info("Successfully completed %s command for node %d!", command, nodeId);
           response
             .status(200)
             .json({ status: "success" });
         }, reason => {
           // TODO flicker light on error!
+          this.logger.warning("Failed to execute %s command for node %d: %s", command, nodeId, reason);
+
           response
             .status(500) // TODO error stuff?
             .json({ status: "error", error: reason });
